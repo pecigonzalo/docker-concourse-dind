@@ -1,0 +1,72 @@
+---
+resources:
+  - name: code
+    type: git
+    source:
+      uri: https://github.com/pecigonzalo/docker-concourse-dind
+
+
+  - name: redis
+    type: docker-image
+    source:
+      repository: redis
+      tag: alpine
+
+  - name: busybox
+    type: docker-image
+    source:
+      repository: busybox
+
+jobs:
+  - name: unit-tests
+    plan:
+      - get: code
+        params: {depth: 1}
+      - task: Run unit tests
+        config:
+          platform: linux
+          image_resource:
+            type: docker-image
+            source:
+              repository: busybox
+          inputs:
+            - name: code
+          run:
+            path: sh
+            args:
+              - -exc
+              - |
+                ./code/example/unit-tests.sh
+
+  - name: integration
+    plan:
+      - aggregate:
+        - get: code
+          params: {depth: 1}
+          passed: [unit-tests]
+          trigger: true
+        - get: redis
+          params: {save: true}
+        - get: busybox
+          params: {save: true}
+      - task: Run integration tests
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: docker-image
+            source:
+              repository: pecigonzalo/concourse-dind:test
+          inputs:
+            - name: code
+            - name: redis
+            - name: busybox
+          run:
+            path: concourse-compose.sh
+            args:
+              - |
+                # This is just to visually check in the log that images have been loaded successfully.
+                docker images
+
+                # Run the container with tests and its dependencies.
+                docker-compose -f code/example/integration.yml run tests
